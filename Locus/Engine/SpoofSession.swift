@@ -90,7 +90,6 @@ final class SpoofSession: ObservableObject {
     private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private var joystickVector: CGVector = .zero
     private let locationKeeper = BackgroundKeepAlive()
-    private let audioKeeper = SilentAudioKeepAlive()
 
     private let favoritesKey = "locus.favorites"
     private let recentsKey = "locus.recents"
@@ -158,7 +157,6 @@ final class SpoofSession: ObservableObject {
         switch phase {
         case .active, .background:
             locationKeeper.start()
-            audioKeeper.start()
             beginBackground()
         case .inactive:
             break
@@ -421,7 +419,6 @@ final class SpoofSession: ObservableObject {
 
     private func beginBackground() {
         locationKeeper.start()
-        audioKeeper.start()
         guard backgroundTask == .invalid else { return }
         backgroundTask = UIApplication.shared.beginBackgroundTask { [weak self] in
             self?.backgroundTaskExpired()
@@ -433,13 +430,11 @@ final class SpoofSession: ObservableObject {
         UIApplication.shared.endBackgroundTask(backgroundTask)
         backgroundTask = .invalid
         // This finite grace task expiring is expected. Keep the location and
-        // audio modes running so iOS can continue scheduling the session.
+        // tunnel/location modes running so iOS can continue scheduling the session.
         locationKeeper.start()
-        audioKeeper.start()
     }
 
     private func endBackground() {
-        audioKeeper.stop()
         guard backgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTask)
         backgroundTask = .invalid
