@@ -55,12 +55,16 @@ enum LocationEngine {
     private static let simulationCreate: Int32 = 10
     private static let locationSet: Int32 = 11
     private static let locationClear: Int32 = 12
+    private static let requestTimeoutSeconds: UInt64 = 5
 
     static var isSessionActive: Bool { locationSimulation != nil }
 
     static func set(latitude: Double, longitude: Double, pairingPath: String, deviceIP: String) -> Result<Void, LocationEngineError> {
         var result: Result<Void, LocationEngineError> = .failure(.locationSet)
         queue.sync {
+            // A broken tunnel must fail and be retried, not wait forever in
+            // the Rust TCP receive path and block the app's UI thread.
+            idevice_set_global_timeout(requestTimeoutSeconds)
             let code = setLocked(latitude: latitude, longitude: longitude, pairingPath: pairingPath, deviceIP: deviceIP)
             result = code == ok ? .success(()) : .failure(.from(code: code))
         }
@@ -70,10 +74,19 @@ enum LocationEngine {
     static func clear() -> Result<Void, LocationEngineError> {
         var result: Result<Void, LocationEngineError> = .failure(.notActive)
         queue.sync {
+            idevice_set_global_timeout(requestTimeoutSeconds)
             let code = clearLocked()
             result = code == ok ? .success(()) : .failure(.from(code: code))
         }
         return result
+    }
+
+    /// Read the session state on the engine queue. This deliberately calls
+    /// back asynchronously because that queue may be waiting on a tunnel.
+    static func sessionActive(completion: @escaping (Bool) -> Void) {
+        queue.async {
+            completion(locationSimulation != nil)
+        }
     }
 
     private static func cleanup() {
@@ -172,3 +185,4 @@ enum LocationEngine {
         return ok
     }
 }
+
