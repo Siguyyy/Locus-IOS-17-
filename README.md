@@ -40,7 +40,7 @@ Locus uses the MIT-licensed [idevice](https://github.com/jkcoxson/idevice) FFI t
 
 **iOS 27:** Settings → **Pair on this iPhone** advertises `_remotepairing-pairable-host._tcp`. Confirm the 6-digit code under Settings › Privacy & Security › Developer Mode › Pair with Host — no computer.
 
-**iOS 18–26:** import an **RPPairing** file once from [idevice_pair](https://github.com/jkcoxson/idevice_pair/releases).
+**iOS 17–26:** import an **RPPairing** file once from [idevice_pair](https://github.com/jkcoxson/idevice_pair/releases).
 
 Also install **[LocalDevVPN](https://apps.apple.com/us/app/localdevvpn/id6755608044)** (loopback tunnel, default `10.7.0.1`), then sideload Locus.
 
@@ -57,6 +57,8 @@ Tools like **iPogo** (and similar modified clients such as SpooferPro) work diff
 Locus is for system-level teleporting. It isn’t a Pokémon GO client or an anti-cheat bypass.
 
 ## Build
+
+Locus 1.0.3 supports iOS 17.0 and later. The iOS 17 build uses the material styling fallback; the on-device pairing flow is available only on iOS 27 and later. On iOS 17–26, import an RPPairing file as described above.
 
 Building from source needs an Apple Developer account (free or paid) for code signing. The published IPA does **not** — just sideload it.
 
@@ -80,3 +82,4 @@ xcodebuild -project Locus.xcodeproj -scheme Locus -configuration Release \
 ## License
 
 MIT. `Vendor/idevice` contains the idevice FFI (MIT). Locus is an independent open-source project and is not affiliated with Mirage / Wapixel.
+
