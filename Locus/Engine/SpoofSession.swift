@@ -89,6 +89,7 @@ final class SpoofSession: ObservableObject {
     private var routeTask: Task<Void, Never>?
     private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private var joystickVector: CGVector = .zero
+    private var engineGeneration = 0
     private let locationKeeper = BackgroundKeepAlive()
 
     private let favoritesKey = "locus.favorites"
@@ -120,21 +121,28 @@ final class SpoofSession: ObservableObject {
         stopJoystick()
         stopResend()
         stopHealth()
+        engineGeneration &+= 1
+        let generation = engineGeneration
         isBusy = true
-        let result = LocationEngine.clear()
-        isBusy = false
-        switch result {
-        case .success:
-            simulated = nil
-            status = .idle
-            endBackground()
-            // Keep location updates running so the map puck / locate button
-            // can return to the real GPS fix (not the leftover pin).
-            locationKeeper.start()
-        case .failure(let error):
-            lastError = error.localizedDescription
-            status = .dropped(error.localizedDescription)
-            postDropNotification(error.localizedDescription)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = LocationEngine.clear()
+            DispatchQueue.main.async {
+                guard let self, self.engineGeneration == generation else { return }
+                self.isBusy = false
+                switch result {
+                case .success:
+                    self.simulated = nil
+                    self.status = .idle
+                    self.endBackground()
+                    // Keep location updates running so the map puck / locate button
+                    // can return to the real GPS fix (not the leftover pin).
+                    self.locationKeeper.start()
+                case .failure(let error):
+                    self.lastError = error.localizedDescription
+                    self.status = .dropped(error.localizedDescription)
+                    self.postDropNotification(error.localizedDescription)
+                }
+            }
         }
     }
 
@@ -308,34 +316,44 @@ final class SpoofSession: ObservableObject {
         if status == .idle || status.isDropped {
             status = .connecting
         }
+        engineGeneration &+= 1
+        let generation = engineGeneration
+        let pairingPath = pairing.pairingPath
         isBusy = true
-        let result = LocationEngine.set(
-            latitude: coordinate.latitude,
-            longitude: coordinate.longitude,
-            pairingPath: pairing.pairingPath,
-            deviceIP: TunnelConfig.targetIP
-        )
-        isBusy = false
-        switch result {
-        case .success:
-            simulated = coordinate
-            pin = coordinate
-            status = .active
-            lastError = nil
-            beginBackground()
-            locationKeeper.start()
-            startResend(pairing: pairing)
-            startHealth(pairing: pairing)
-            if markRecent {
-                pushRecent(coordinate)
-            }
-        case .failure(let error):
-            lastError = error.localizedDescription
-            if simulated != nil {
-                status = .dropped(error.localizedDescription)
-                postDropNotification(error.localizedDescription)
-            } else {
-                status = .idle
+        // The FFI can wait on a tunnel response. Never run it on the main
+        // actor: iOS kills the app after a 10-second scene watchdog timeout.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = LocationEngine.set(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude,
+                pairingPath: pairingPath,
+                deviceIP: TunnelConfig.targetIP
+            )
+            DispatchQueue.main.async {
+                guard let self, self.engineGeneration == generation else { return }
+                self.isBusy = false
+                switch result {
+                case .success:
+                    self.simulated = coordinate
+                    self.pin = coordinate
+                    self.status = .active
+                    self.lastError = nil
+                    self.beginBackground()
+                    self.locationKeeper.start()
+                    self.startResend(pairing: pairing)
+                    self.startHealth(pairing: pairing)
+                    if markRecent {
+                        self.pushRecent(coordinate)
+                    }
+                case .failure(let error):
+                    self.lastError = error.localizedDescription
+                    if self.simulated != nil {
+                        self.status = .dropped(error.localizedDescription)
+                        self.postDropNotification(error.localizedDescription)
+                    } else {
+                        self.status = .idle
+                    }
+                }
             }
         }
     }
@@ -358,12 +376,15 @@ final class SpoofSession: ObservableObject {
         resendTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let sim = self.simulated else { return }
-                _ = LocationEngine.set(
-                    latitude: sim.latitude,
-                    longitude: sim.longitude,
-                    pairingPath: pairing.pairingPath,
-                    deviceIP: TunnelConfig.targetIP
-                )
+                let pairingPath = pairing.pairingPath
+                DispatchQueue.global(qos: .utility).async {
+                    _ = LocationEngine.set(
+                        latitude: sim.latitude,
+                        longitude: sim.longitude,
+                        pairingPath: pairingPath,
+                        deviceIP: TunnelConfig.targetIP
+                    )
+                }
             }
         }
     }
@@ -381,9 +402,15 @@ final class SpoofSession: ObservableObject {
                 if case .dropped = self.status {
                     self.status = .reconnecting
                     self.apply(sim, pairing: pairing, markRecent: false)
-                } else if !LocationEngine.isSessionActive, self.isSpoofing {
-                    self.status = .reconnecting
-                    self.apply(sim, pairing: pairing, markRecent: false)
+                } else if self.isSpoofing {
+                    LocationEngine.sessionActive { [weak self] active in
+                        DispatchQueue.main.async {
+                            guard let self, !active, self.isSpoofing,
+                                  let sim = self.simulated else { return }
+                            self.status = .reconnecting
+                            self.apply(sim, pairing: pairing, markRecent: false)
+                        }
+                    }
                 }
             }
         }
