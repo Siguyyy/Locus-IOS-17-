@@ -2,7 +2,7 @@
 
 ## 1. Sideload the IPA
 
-This build targets iOS 17.0 and later. The "Pair on this iPhone" flow requires iOS 27; iOS 17–26 users should import an RPPairing file. Version 1.0.3 uses the material styling fallback so it can be built with an iOS 17-compatible Xcode SDK.
+This build targets iOS 17.0 and later. The "Pair on this iPhone" flow requires iOS 27; iOS 17–26 users should import an RPPairing file. Version 1.0.4 uses the material styling fallback so it can be built with an iOS 17-compatible Xcode SDK and keeps the spoof session alive with background location plus silent audio.
 
 Install the latest IPA from [Releases](https://github.com/ChrisMack32/Locus/releases) (or build from source) with Feather, SideStore, AltStore, Sideloadly, or LiveContainer.
 
