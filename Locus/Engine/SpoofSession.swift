@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import MapKit
+import SwiftUI
 import UIKit
 import UserNotifications
 
@@ -89,6 +90,7 @@ final class SpoofSession: ObservableObject {
     private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private var joystickVector: CGVector = .zero
     private let locationKeeper = BackgroundKeepAlive()
+    private let audioKeeper = SilentAudioKeepAlive()
 
     private let favoritesKey = "locus.favorites"
     private let recentsKey = "locus.recents"
@@ -145,6 +147,24 @@ final class SpoofSession: ObservableObject {
     /// Start lightweight GPS updates for the map puck / locate button.
     func startLocationUpdates() {
         locationKeeper.start()
+    }
+
+    /// Reassert the background keep-alives whenever the scene changes state.
+    /// Location mode is the primary mechanism; the audio session keeps the
+    /// process runnable so the resend and health timers can continue while the
+    /// app is not visible.
+    func handleScenePhase(_ phase: ScenePhase) {
+        guard isSpoofing else { return }
+        switch phase {
+        case .active, .background:
+            locationKeeper.start()
+            audioKeeper.start()
+            beginBackground()
+        case .inactive:
+            break
+        @unknown default:
+            break
+        }
     }
 
     func startJoystick(pairing: PairingStore) {
@@ -400,13 +420,26 @@ final class SpoofSession: ObservableObject {
     }
 
     private func beginBackground() {
+        locationKeeper.start()
+        audioKeeper.start()
         guard backgroundTask == .invalid else { return }
         backgroundTask = UIApplication.shared.beginBackgroundTask { [weak self] in
-            self?.endBackground()
+            self?.backgroundTaskExpired()
         }
     }
 
+    private func backgroundTaskExpired() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+        // This finite grace task expiring is expected. Keep the location and
+        // audio modes running so iOS can continue scheduling the session.
+        locationKeeper.start()
+        audioKeeper.start()
+    }
+
     private func endBackground() {
+        audioKeeper.stop()
         guard backgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTask)
         backgroundTask = .invalid
@@ -429,3 +462,4 @@ final class SpoofSession: ObservableObject {
         return CLLocationCoordinate2D(latitude: coordinate.latitude + dLat, longitude: coordinate.longitude + dLon)
     }
 }
+
