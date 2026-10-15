@@ -16,37 +16,22 @@ enum LocusGlassStyle {
     case interactive
 }
 
-/// Liquid Glass on iOS 26+; material fallback earlier.
+/// Material-based glass styling kept compatible with the iOS 17 SDK.
 struct LocusGlassModifier<S: Shape>: ViewModifier {
     var style: LocusGlassStyle
     var shape: S
     var tint: Color?
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content
-                .glassEffect(glass, in: shape)
-                // Glass draws outside the layout bounds; expand hit-testing to match.
-                .contentShape(shape)
-        } else {
-            content
-                .background {
-                    shape.fill(.ultraThinMaterial)
-                    if let tint {
-                        shape.fill(tint.opacity(0.55))
-                    }
+        content
+            .background {
+                shape.fill(.ultraThinMaterial)
+                if let tint {
+                    shape.fill(tint.opacity(0.55))
                 }
-                .overlay(shape.stroke(LocusTheme.panelStroke, lineWidth: 1))
-                .contentShape(shape)
-        }
-    }
-
-    @available(iOS 26.0, *)
-    private var glass: Glass {
-        var g: Glass = style == .clear ? .clear : .regular
-        if style == .interactive { g = g.interactive() }
-        if let tint { g = g.tint(tint) }
-        return g
+            }
+            .overlay(shape.stroke(LocusTheme.panelStroke, lineWidth: 1))
+            .contentShape(shape)
     }
 }
 
@@ -63,3 +48,4 @@ extension View {
         locusGlass(style, tint: tint, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 }
+
