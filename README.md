@@ -58,7 +58,7 @@ Locus is for system-level teleporting. It isn’t a Pokémon GO client or an ant
 
 ## Build
 
-Locus 1.0.5 supports iOS 17.0 and later. The iOS 17 build uses the material styling fallback; the on-device pairing flow is available only on iOS 27 and later. On iOS 17–26, import an RPPairing file as described above.
+Locus 1.0.6 supports iOS 17.0 and later. The iOS 17 build uses the material styling fallback; the on-device pairing flow is available only on iOS 27 and later. On iOS 17–26, import an RPPairing file as described above.
 
 Building from source needs an Apple Developer account (free or paid) for code signing. The published IPA does **not** — just sideload it.
 
