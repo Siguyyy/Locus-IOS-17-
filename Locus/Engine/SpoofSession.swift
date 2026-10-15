@@ -149,9 +149,8 @@ final class SpoofSession: ObservableObject {
     }
 
     /// Reassert the background keep-alives whenever the scene changes state.
-    /// Location mode is the primary mechanism; the audio session keeps the
-    /// process runnable so the resend and health timers can continue while the
-    /// app is not visible.
+    /// Location mode is the primary mechanism so the resend and health timers
+    /// can continue while the app is not visible.
     func handleScenePhase(_ phase: ScenePhase) {
         guard isSpoofing else { return }
         switch phase {
