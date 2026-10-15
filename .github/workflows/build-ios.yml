@@ -1,0 +1,47 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build unsigned app
+        run: |
+          xcodebuild \
+            -project Locus.xcodeproj \
+            -scheme Locus \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM= \
+            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
+            build
+
+      - name: Package IPA
+        run: |
+          mkdir -p artifact/Payload
+          cp -R build/Build/Products/Release-iphoneos/Locus.app artifact/Payload/
+          cd artifact
+          zip -qry ../Locus-iOS17-1.0.3-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Locus-iOS17-1.0.3-unsigned
+          path: Locus-iOS17-1.0.3-unsigned.ipa
+
