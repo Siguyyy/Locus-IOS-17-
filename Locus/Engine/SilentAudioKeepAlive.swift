@@ -5,10 +5,42 @@ import Foundation
 /// TCP) while the user is in Settings › Developer Mode.
 final class SilentAudioKeepAlive {
     private var player: AVAudioPlayer?
-    private var wasActive = false
+    private var interruptionObserver: NSObjectProtocol?
+    private var resetObserver: NSObjectProtocol?
+
+    init() {
+        let center = NotificationCenter.default
+        interruptionObserver = center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] note in
+            guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+            if type == .ended {
+                self?.start()
+            }
+        }
+        resetObserver = center.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] _ in
+            self?.start()
+        }
+    }
+
+    deinit {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+        if let resetObserver {
+            NotificationCenter.default.removeObserver(resetObserver)
+        }
+    }
 
     func start() {
-        guard !wasActive else { return }
+        if player?.isPlaying == true { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, options: [.mixWithOthers])
@@ -20,9 +52,11 @@ final class SilentAudioKeepAlive {
             p.numberOfLoops = -1
             p.volume = 0.01
             p.prepareToPlay()
-            p.play()
+            guard p.play() else {
+                NSLog("[Locus] silent audio keep-alive could not start playback")
+                return
+            }
             player = p
-            wasActive = true
             NSLog("[Locus] silent audio keep-alive started")
         } catch {
             NSLog("[Locus] silent audio keep-alive failed: %@", error.localizedDescription)
@@ -32,7 +66,6 @@ final class SilentAudioKeepAlive {
     func stop() {
         player?.stop()
         player = nil
-        wasActive = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -73,3 +106,4 @@ final class SilentAudioKeepAlive {
         return url
     }
 }
+
