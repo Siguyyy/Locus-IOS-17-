@@ -123,26 +123,26 @@ final class SpoofSession: ObservableObject {
         stopResend()
         stopHealth()
         engineGeneration &+= 1
-        let generation = engineGeneration
-        isBusy = true
+        // Stop must not wait for the developer tunnel. If LocalDevVPN has
+        // already dropped, the native clear call can wait indefinitely on a
+        // dead RemoteXPC connection and leave the Stop button apparently
+        // broken. Reset the app-owned state first; native cleanup is best
+        // effort on a detached utility queue below.
+        isBusy = false
+        simulated = nil
+        status = .idle
+        lastError = nil
+        endBackground()
+        locationKeeper.start()
+        NSLog("[Locus][Session] stop requested; UI state reset immediately")
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = LocationEngine.clear()
-            DispatchQueue.main.async {
-                guard let self, self.engineGeneration == generation else { return }
-                self.isBusy = false
-                switch result {
-                case .success:
-                    self.simulated = nil
-                    self.status = .idle
-                    self.endBackground()
-                    // Keep location updates running so the map puck / locate button
-                    // can return to the real GPS fix (not the leftover pin).
-                    self.locationKeeper.start()
-                case .failure(let error):
-                    self.lastError = error.localizedDescription
-                    self.status = .dropped(error.localizedDescription)
-                    self.postDropNotification(error.localizedDescription)
-                }
+            switch result {
+            case .success:
+                NSLog("[Locus][Session] native stop cleanup succeeded")
+            case .failure(let error):
+                NSLog("[Locus][Session] native stop cleanup deferred/failed: %@", error.localizedDescription)
             }
         }
     }
