@@ -2,6 +2,8 @@
 
 ## 1. Sideload the IPA
 
+This build targets iOS 17.0 and later. The "Pair on this iPhone" flow requires iOS 27; iOS 17–26 users should import an RPPairing file. Version 1.0.7 uses the material styling fallback so it can be built with an iOS 17-compatible Xcode SDK, keeps the spoof session alive with background location/audio, uses background-safe resend timers, and prevents tunnel waits from freezing the UI.
+
 Install the latest IPA from [Releases](https://github.com/ChrisMack32/Locus/releases) (or build from source) with Feather, SideStore, AltStore, Sideloadly, or LiveContainer.
 
 Bundle ID: `com.chrismack.locus`
@@ -26,7 +28,7 @@ File pickers often break inside LiveContainer. Do one of the following:
 6. When the second prompt appears, type the **6-digit code** Locus shows (also sent as a notification).
 7. Done — RPPairing file is saved on-device.
 
-### On iOS 18–26
+### On iOS 17–26
 
 1. On a computer, download [idevice_pair](https://github.com/jkcoxson/idevice_pair/releases).
 2. Plug in your iPhone, unlock, Trust.
@@ -40,3 +42,4 @@ Install [LocalDevVPN](https://apps.apple.com/us/app/localdevvpn/id6755608044), c
 ## 4. Teleport
 
 On Wi‑Fi: drop a pin → **Teleport**. Then joystick / routes / GPX work; the session can continue on cellular.
+

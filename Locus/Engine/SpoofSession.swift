@@ -1,6 +1,8 @@
 import CoreLocation
 import Foundation
 import MapKit
+import Network
+import SwiftUI
 import UIKit
 import UserNotifications
 
@@ -82,13 +84,18 @@ final class SpoofSession: ObservableObject {
     @Published var favorites: [SavedPlace] = []
     @Published var recents: [SavedPlace] = []
 
-    private var resendTimer: Timer?
-    private var healthTimer: Timer?
+    private var resendTimer: DispatchSourceTimer?
+    private var healthTimer: DispatchSourceTimer?
     private var joystickTimer: Timer?
     private var routeTask: Task<Void, Never>?
     private var backgroundTask = UIBackgroundTaskIdentifier.invalid
     private var joystickVector: CGVector = .zero
+    private var engineGeneration = 0
     private let locationKeeper = BackgroundKeepAlive()
+    private let audioKeepAlive = SilentAudioKeepAlive()
+    private let pathMonitor = NWPathMonitor()
+    private let pathMonitorQueue = DispatchQueue(label: "com.chrismack.locus.network-path", qos: .utility)
+    private var activePairing: PairingStore?
 
     private let favoritesKey = "locus.favorites"
     private let recentsKey = "locus.recents"
@@ -96,6 +103,16 @@ final class SpoofSession: ObservableObject {
     init() {
         favorites = SavedPlace.load(key: favoritesKey)
         recents = SavedPlace.load(key: recentsKey)
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                self?.networkPathChanged(path)
+            }
+        }
+        pathMonitor.start(queue: pathMonitorQueue)
+    }
+
+    deinit {
+        pathMonitor.cancel()
     }
 
     var isSpoofing: Bool {
@@ -119,21 +136,28 @@ final class SpoofSession: ObservableObject {
         stopJoystick()
         stopResend()
         stopHealth()
-        isBusy = true
-        let result = LocationEngine.clear()
+        engineGeneration &+= 1
+        // Stop must not wait for the developer tunnel. If LocalDevVPN has
+        // already dropped, the native clear call can wait indefinitely on a
+        // dead RemoteXPC connection and leave the Stop button apparently
+        // broken. Reset the app-owned state first; native cleanup is best
+        // effort on a detached utility queue below.
         isBusy = false
-        switch result {
-        case .success:
-            simulated = nil
-            status = .idle
-            endBackground()
-            // Keep location updates running so the map puck / locate button
-            // can return to the real GPS fix (not the leftover pin).
-            locationKeeper.start()
-        case .failure(let error):
-            lastError = error.localizedDescription
-            status = .dropped(error.localizedDescription)
-            postDropNotification(error.localizedDescription)
+        simulated = nil
+        status = .idle
+        lastError = nil
+        endBackground()
+        locationKeeper.start()
+        NSLog("[Locus][Session] stop requested; UI state reset immediately")
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = LocationEngine.clear()
+            switch result {
+            case .success:
+                NSLog("[Locus][Session] native stop cleanup succeeded")
+            case .failure(let error):
+                NSLog("[Locus][Session] native stop cleanup deferred/failed: %@", error.localizedDescription)
+            }
         }
     }
 
@@ -145,6 +169,50 @@ final class SpoofSession: ObservableObject {
     /// Start lightweight GPS updates for the map puck / locate button.
     func startLocationUpdates() {
         locationKeeper.start()
+    }
+
+    /// Reassert the background keep-alives whenever the scene changes state.
+    /// Location mode is the primary mechanism so the resend and health timers
+    /// can continue while the app is not visible.
+    func handleScenePhase(_ phase: ScenePhase) {
+        NSLog("[Locus][Session] scene phase=%@ spoofing=%d", String(describing: phase), isSpoofing ? 1 : 0)
+        guard isSpoofing else { return }
+        switch phase {
+        case .active, .background:
+            locationKeeper.start()
+            beginBackground()
+        case .inactive:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    private func networkPathChanged(_ path: NWPath) {
+        guard isSpoofing else { return }
+        NSLog("[Locus][Session] network path changed status=%@ wifi=%d cellular=%d", String(describing: path.status), path.usesInterfaceType(.wifi) ? 1 : 0, path.usesInterfaceType(.cellular) ? 1 : 0)
+
+        guard path.status == .satisfied else {
+            status = .reconnecting
+            lastError = "Network changed; waiting for the developer tunnel to reconnect."
+            return
+        }
+        guard let simulated, let pairing = activePairing else { return }
+
+        status = .reconnecting
+        lastError = nil
+        stopResend()
+        stopHealth()
+        engineGeneration &+= 1
+        let generation = engineGeneration
+        isBusy = true
+
+        LocationEngine.resetAsync { [weak self] in
+            guard let self,
+                  self.engineGeneration == generation,
+                  self.isSpoofing else { return }
+            self.apply(simulated, pairing: pairing, markRecent: false)
+        }
     }
 
     func startJoystick(pairing: PairingStore) {
@@ -291,34 +359,48 @@ final class SpoofSession: ObservableObject {
         if status == .idle || status.isDropped {
             status = .connecting
         }
+        engineGeneration &+= 1
+        let generation = engineGeneration
+        let pairingPath = pairing.pairingPath
         isBusy = true
-        let result = LocationEngine.set(
-            latitude: coordinate.latitude,
-            longitude: coordinate.longitude,
-            pairingPath: pairing.pairingPath,
-            deviceIP: TunnelConfig.targetIP
-        )
-        isBusy = false
-        switch result {
-        case .success:
-            simulated = coordinate
-            pin = coordinate
-            status = .active
-            lastError = nil
-            beginBackground()
-            locationKeeper.start()
-            startResend(pairing: pairing)
-            startHealth(pairing: pairing)
-            if markRecent {
-                pushRecent(coordinate)
-            }
-        case .failure(let error):
-            lastError = error.localizedDescription
-            if simulated != nil {
-                status = .dropped(error.localizedDescription)
-                postDropNotification(error.localizedDescription)
-            } else {
-                status = .idle
+        NSLog("[Locus][Session] apply generation=%d markRecent=%d", generation, markRecent ? 1 : 0)
+        // The FFI can wait on a tunnel response. Never run it on the main
+        // actor: iOS kills the app after a 10-second scene watchdog timeout.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = LocationEngine.set(
+                latitude: coordinate.latitude,
+                longitude: coordinate.longitude,
+                pairingPath: pairingPath,
+                deviceIP: TunnelConfig.targetIP
+            )
+            DispatchQueue.main.async {
+                guard let self, self.engineGeneration == generation else { return }
+                self.isBusy = false
+                switch result {
+                case .success:
+                    NSLog("[Locus][Session] apply success generation=%d", generation)
+                    self.simulated = coordinate
+                    self.pin = coordinate
+                    self.activePairing = pairing
+                    self.status = .active
+                    self.lastError = nil
+                    self.beginBackground()
+                    self.locationKeeper.start()
+                    self.startResend(pairing: pairing)
+                    self.startHealth(pairing: pairing)
+                    if markRecent {
+                        self.pushRecent(coordinate)
+                    }
+                case .failure(let error):
+                    NSLog("[Locus][Session] apply failed generation=%d error=%@", generation, error.localizedDescription)
+                    self.lastError = error.localizedDescription
+                    if self.simulated != nil {
+                        self.status = .dropped(error.localizedDescription)
+                        self.postDropNotification(error.localizedDescription)
+                    } else {
+                        self.status = .idle
+                    }
+                }
             }
         }
     }
@@ -337,43 +419,84 @@ final class SpoofSession: ObservableObject {
     }
 
     private func startResend(pairing: PairingStore) {
-        resendTimer?.invalidate()
-        resendTimer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let sim = self.simulated else { return }
-                _ = LocationEngine.set(
-                    latitude: sim.latitude,
-                    longitude: sim.longitude,
-                    pairingPath: pairing.pairingPath,
-                    deviceIP: TunnelConfig.targetIP
-                )
+        stopResend()
+        guard let sim = simulated else { return }
+        let pairingPath = pairing.pairingPath
+        let deviceIP = TunnelConfig.targetIP
+        let generation = engineGeneration
+        NSLog("[Locus][Session] resend timer start interval=8")
+        let timer = DispatchSource.makeTimerSource(
+            flags: [],
+            queue: DispatchQueue(label: "com.chrismack.locus.location-resend", qos: .utility)
+        )
+        // Foundation Timer is tied to the main run loop and can stop firing
+        // when the app is backgrounded. A GCD timer remains schedulable while
+        // the location/audio background modes keep the process alive.
+        timer.schedule(deadline: .now() + .seconds(8), repeating: .seconds(8), leeway: .seconds(1))
+        timer.setEventHandler { [weak self] in
+            NSLog("[Locus][Session] resend fired")
+            // Do not hop to the main actor before making the tunnel call. The
+            // main actor may not be scheduled while the app is backgrounded.
+            // Run directly on this serial timer queue so a slow tunnel call
+            // cannot create overlapping resend operations.
+            let result = LocationEngine.set(
+                latitude: sim.latitude,
+                longitude: sim.longitude,
+                pairingPath: pairingPath,
+                deviceIP: deviceIP
+            )
+            DispatchQueue.main.async {
+                guard let self,
+                      self.engineGeneration == generation,
+                      self.isSpoofing else { return }
+                if case .failure(let error) = result {
+                    NSLog("[Locus][Session] resend failed error=%@; reconnecting", error.localizedDescription)
+                    self.lastError = error.localizedDescription
+                    self.status = .reconnecting
+                    self.apply(sim, pairing: pairing, markRecent: false)
+                } else {
+                    NSLog("[Locus][Session] resend succeeded")
+                }
             }
         }
+        resendTimer = timer
+        timer.resume()
     }
 
     private func stopResend() {
-        resendTimer?.invalidate()
+        resendTimer?.setEventHandler {}
+        resendTimer?.cancel()
         resendTimer = nil
     }
 
     private func startHealth(pairing: PairingStore) {
-        healthTimer?.invalidate()
-        healthTimer = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let sim = self.simulated else { return }
-                if case .dropped = self.status {
-                    self.status = .reconnecting
-                    self.apply(sim, pairing: pairing, markRecent: false)
-                } else if !LocationEngine.isSessionActive, self.isSpoofing {
+        stopHealth()
+        NSLog("[Locus][Session] health timer start interval=12")
+        let timer = DispatchSource.makeTimerSource(
+            flags: [],
+            queue: DispatchQueue(label: "com.chrismack.locus.health", qos: .utility)
+        )
+        timer.schedule(deadline: .now() + .seconds(12), repeating: .seconds(12), leeway: .seconds(2))
+        timer.setEventHandler { [weak self] in
+            NSLog("[Locus][Session] health fired")
+            // Probe the native session directly from the timer queue. Only
+            // the resulting UI transition needs the main actor.
+            LocationEngine.sessionActive { [weak self] active in
+                DispatchQueue.main.async {
+                    guard let self, !active, self.isSpoofing,
+                          let sim = self.simulated else { return }
                     self.status = .reconnecting
                     self.apply(sim, pairing: pairing, markRecent: false)
                 }
             }
         }
+        healthTimer = timer
+        timer.resume()
     }
 
     private func stopHealth() {
-        healthTimer?.invalidate()
+        healthTimer?.setEventHandler {}
+        healthTimer?.cancel()
         healthTimer = nil
     }
 
@@ -400,13 +523,33 @@ final class SpoofSession: ObservableObject {
     }
 
     private func beginBackground() {
+        NSLog("[Locus][Session] begin background keep-alive")
+        locationKeeper.start()
+        // A silent playback session is a practical iOS background execution
+        // keep-alive for this developer-only tunnel. Its AVFoundation work is
+        // serialized off the main actor so it cannot reintroduce the watchdog
+        // freeze that was fixed in 1.0.6.
+        audioKeepAlive.start()
         guard backgroundTask == .invalid else { return }
         backgroundTask = UIApplication.shared.beginBackgroundTask { [weak self] in
-            self?.endBackground()
+            self?.backgroundTaskExpired()
         }
     }
 
+    private func backgroundTaskExpired() {
+        NSLog("[Locus][Session] finite background task expired; reasserting keep-alives")
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+        // This finite grace task expiring is expected. Keep the location and
+        // tunnel/location modes running so iOS can continue scheduling the session.
+        locationKeeper.start()
+        audioKeepAlive.start()
+    }
+
     private func endBackground() {
+        NSLog("[Locus][Session] end background keep-alive")
+        audioKeepAlive.stop()
         guard backgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTask)
         backgroundTask = .invalid
@@ -429,3 +572,5 @@ final class SpoofSession: ObservableObject {
         return CLLocationCoordinate2D(latitude: coordinate.latitude + dLat, longitude: coordinate.longitude + dLon)
     }
 }
+
+

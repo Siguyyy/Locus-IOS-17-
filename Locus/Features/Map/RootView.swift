@@ -4,6 +4,7 @@ import NetworkExtension
 struct RootView: View {
     @EnvironmentObject private var session: SpoofSession
     @EnvironmentObject private var pairing: PairingStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
     @State private var showPlaces = false
 
@@ -25,6 +26,12 @@ struct RootView: View {
         }
         .sheet(isPresented: $showPlaces) {
             PlacesView()
+        }
+        .onAppear {
+            session.handleScenePhase(scenePhase)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            session.handleScenePhase(phase)
         }
         .alert("Locus", isPresented: Binding(
             get: { session.lastError != nil },
@@ -291,3 +298,4 @@ struct IconButton: View {
         .foregroundStyle(.primary)
     }
 }
+

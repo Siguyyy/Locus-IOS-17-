@@ -15,7 +15,7 @@ enum LocationEngineError: LocalizedError {
         switch self {
         case .invalidIP: return "Tunnel IP is invalid. Check Settings → Tunnel IP (usually 10.7.0.1)."
         case .pairingRead: return "Could not read the RPPairing file. Generate one with idevice_pair in RPPairing mode."
-        case .tunnelCreate: return "Could not open the developer tunnel. Is LocalDevVPN connected on Wi‑Fi?"
+        case .tunnelCreate: return "Could not open the developer tunnel. Keep LocalDevVPN connected while switching networks."
         case .remoteServer: return "Connected to the tunnel but RemoteXPC handshake failed."
         case .simulationCreate: return "Could not open Apple’s location simulation service."
         case .locationSet: return "Failed to set simulated coordinates."
@@ -55,13 +55,22 @@ enum LocationEngine {
     private static let simulationCreate: Int32 = 10
     private static let locationSet: Int32 = 11
     private static let locationClear: Int32 = 12
+    private static let requestTimeoutSeconds: UInt64 = 5
+    private static var operationCounter: UInt64 = 0
 
     static var isSessionActive: Bool { locationSimulation != nil }
 
     static func set(latitude: Double, longitude: Double, pairingPath: String, deviceIP: String) -> Result<Void, LocationEngineError> {
         var result: Result<Void, LocationEngineError> = .failure(.locationSet)
         queue.sync {
+            operationCounter &+= 1
+            let operation = operationCounter
+            NSLog("[Locus][Engine] set begin op=%llu existing=%d", operation, locationSimulation == nil ? 0 : 1)
+            // A broken tunnel must fail and be retried, not wait forever in
+            // the Rust TCP receive path and block the app's UI thread.
+            idevice_set_global_timeout(requestTimeoutSeconds)
             let code = setLocked(latitude: latitude, longitude: longitude, pairingPath: pairingPath, deviceIP: deviceIP)
+            NSLog("[Locus][Engine] set end op=%llu code=%d active=%d", operation, code, locationSimulation == nil ? 0 : 1)
             result = code == ok ? .success(()) : .failure(.from(code: code))
         }
         return result
@@ -70,10 +79,38 @@ enum LocationEngine {
     static func clear() -> Result<Void, LocationEngineError> {
         var result: Result<Void, LocationEngineError> = .failure(.notActive)
         queue.sync {
+            operationCounter &+= 1
+            let operation = operationCounter
+            NSLog("[Locus][Engine] clear begin op=%llu active=%d", operation, locationSimulation == nil ? 0 : 1)
+            idevice_set_global_timeout(requestTimeoutSeconds)
             let code = clearLocked()
+            NSLog("[Locus][Engine] clear end op=%llu code=%d active=%d", operation, code, locationSimulation == nil ? 0 : 1)
             result = code == ok ? .success(()) : .failure(.from(code: code))
         }
         return result
+    }
+
+    /// Tear down a tunnel that may have become stale after a Wi-Fi/cellular
+    /// handoff. The cleanup runs on the engine queue so it cannot race a set
+    /// or clear operation, and it does not block the main actor.
+    static func resetAsync(completion: @escaping () -> Void) {
+        queue.async {
+            NSLog("[Locus][Engine] resetting tunnel after network change")
+            cleanup()
+            DispatchQueue.main.async {
+                completion()
+            }
+        }
+    }
+
+    /// Read the session state on the engine queue. This deliberately calls
+    /// back asynchronously because that queue may be waiting on a tunnel.
+    static func sessionActive(completion: @escaping (Bool) -> Void) {
+        queue.async {
+            let active = locationSimulation != nil
+            NSLog("[Locus][Engine] health active=%d", active ? 1 : 0)
+            completion(active)
+        }
     }
 
     private static func cleanup() {
@@ -98,6 +135,7 @@ enum LocationEngine {
     private static func setLocked(latitude: Double, longitude: Double, pairingPath: String, deviceIP: String) -> Int32 {
         if let locationSimulation {
             if let err = location_simulation_set(locationSimulation, latitude, longitude) {
+                NSLog("[Locus][Engine] existing simulation set failed; rebuilding tunnel")
                 idevice_error_free(err)
                 cleanup()
             } else {
@@ -134,18 +172,21 @@ enum LocationEngine {
             }
         }
         if let providerError {
+            NSLog("[Locus][Engine] tunnel_create failed")
             idevice_error_free(providerError)
             cleanup()
             return tunnelCreate
         }
 
         if let remoteServerError = remote_server_connect_rsd(adapter, handshake, &remoteServer) {
+            NSLog("[Locus][Engine] remote_server_connect_rsd failed")
             idevice_error_free(remoteServerError)
             cleanup()
             return remoteServerCode
         }
 
         if let simError = location_simulation_new(remoteServer, &locationSimulation) {
+            NSLog("[Locus][Engine] location_simulation_new failed")
             idevice_error_free(simError)
             cleanup()
             return simulationCreate
@@ -154,6 +195,7 @@ enum LocationEngine {
         remoteServer = nil
 
         if let setError = location_simulation_set(locationSimulation, latitude, longitude) {
+            NSLog("[Locus][Engine] initial location_simulation_set failed")
             idevice_error_free(setError)
             cleanup()
             return locationSet
@@ -172,3 +214,5 @@ enum LocationEngine {
         return ok
     }
 }
+
+

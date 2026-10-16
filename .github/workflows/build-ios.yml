@@ -1,0 +1,72 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, ios17-compatibility]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Build idevice with bounded location replies
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: 17.0
+          CFLAGS: -miphoneos-version-min=17.0
+          RUSTFLAGS: -C link-arg=-miphoneos-version-min=17.0
+        run: |
+          IDEVICE_SOURCE="$RUNNER_TEMP/idevice"
+          git clone --no-checkout https://github.com/jkcoxson/idevice.git "$IDEVICE_SOURCE"
+          git -C "$IDEVICE_SOURCE" checkout 3854a5df4a5a6dee71ffce4d8befc2ea356a8065
+          python3 "$GITHUB_WORKSPACE/tools/patch-idevice-location-timeout.py" \
+            "$IDEVICE_SOURCE/idevice/src/services/dvt/location_simulation.rs"
+          cargo build \
+            --manifest-path "$IDEVICE_SOURCE/ffi/Cargo.toml" \
+            --release \
+            --target aarch64-apple-ios \
+            --features obfuscate
+          cp "$IDEVICE_SOURCE/target/aarch64-apple-ios/release/libidevice_ffi.a" \
+            "$GITHUB_WORKSPACE/Vendor/idevice/libidevice_ffi.a"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build unsigned app
+        run: |
+          xcodebuild \
+            -project Locus.xcodeproj \
+            -scheme Locus \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            DEVELOPMENT_TEAM= \
+            IPHONEOS_DEPLOYMENT_TARGET=17.0 \
+            build
+
+      - name: Package IPA
+        run: |
+          mkdir -p artifact/Payload
+          cp -R build/Build/Products/Release-iphoneos/Locus.app artifact/Payload/
+          cd artifact
+          zip -qry ../Locus-iOS17-1.0.11-tunnel-timeout-unsigned.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Locus-iOS17-1.0.11-tunnel-timeout-unsigned
+          path: Locus-iOS17-1.0.11-tunnel-timeout-unsigned.ipa
+
+

@@ -361,7 +361,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -380,7 +380,7 @@
 				CODE_SIGN_ENTITLEMENTS = Locus/Resources/Locus.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -391,7 +391,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/Vendor/idevice",
 				);
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 1.0.11;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lidevice_ffi",
@@ -466,7 +466,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -486,7 +486,7 @@
 				CODE_SIGN_ENTITLEMENTS = Locus/Resources/Locus.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -497,7 +497,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/Vendor/idevice",
 				);
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 1.0.11;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lidevice_ffi",
@@ -545,3 +545,5 @@
 	};
 	rootObject = EB04EC8B4299D1D64DC4EDE5 /* Project object */;
 }
+
+

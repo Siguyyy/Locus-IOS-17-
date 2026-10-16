@@ -93,7 +93,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Tunnel")
                 } footer: {
-                    Text("Connect LocalDevVPN before teleporting. Default tunnel IP is 10.7.0.1. Start a spoof on Wi‑Fi first; it can keep working on cellular afterward.")
+                    Text("Connect LocalDevVPN before teleporting. Default tunnel IP is 10.7.0.1. Locus will rebuild the developer tunnel when Wi‑Fi and cellular change.")
                 }
 
                 Section("Privacy") {
@@ -260,3 +260,4 @@ struct PlacesView: View {
         }
     }
 }
+
