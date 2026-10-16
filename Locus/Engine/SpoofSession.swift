@@ -378,6 +378,10 @@ final class SpoofSession: ObservableObject {
 
     private func startResend(pairing: PairingStore) {
         stopResend()
+        guard let sim = simulated else { return }
+        let pairingPath = pairing.pairingPath
+        let deviceIP = TunnelConfig.targetIP
+        let generation = engineGeneration
         NSLog("[Locus][Session] resend timer start interval=8")
         let timer = DispatchSource.makeTimerSource(
             flags: [],
@@ -388,8 +392,29 @@ final class SpoofSession: ObservableObject {
         // the location/audio background modes keep the process alive.
         timer.schedule(deadline: .now() + .seconds(8), repeating: .seconds(8), leeway: .seconds(1))
         timer.setEventHandler { [weak self] in
-            Task { @MainActor in
-                self?.resendOnce(pairing: pairing)
+            NSLog("[Locus][Session] resend fired")
+            // Do not hop to the main actor before making the tunnel call. The
+            // main actor may not be scheduled while the app is backgrounded.
+            // Run directly on this serial timer queue so a slow tunnel call
+            // cannot create overlapping resend operations.
+            let result = LocationEngine.set(
+                latitude: sim.latitude,
+                longitude: sim.longitude,
+                pairingPath: pairingPath,
+                deviceIP: deviceIP
+            )
+            DispatchQueue.main.async {
+                guard let self,
+                      self.engineGeneration == generation,
+                      self.isSpoofing else { return }
+                if case .failure(let error) = result {
+                    NSLog("[Locus][Session] resend failed error=%@; reconnecting", error.localizedDescription)
+                    self.lastError = error.localizedDescription
+                    self.status = .reconnecting
+                    self.apply(sim, pairing: pairing, markRecent: false)
+                } else {
+                    NSLog("[Locus][Session] resend succeeded")
+                }
             }
         }
         resendTimer = timer
@@ -402,38 +427,6 @@ final class SpoofSession: ObservableObject {
         resendTimer = nil
     }
 
-    private func resendOnce(pairing: PairingStore) {
-        guard isSpoofing, !isBusy, let sim = simulated else { return }
-        NSLog("[Locus][Session] resend fired")
-        let generation = engineGeneration
-        let pairingPath = pairing.pairingPath
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let result = LocationEngine.set(
-                latitude: sim.latitude,
-                longitude: sim.longitude,
-                pairingPath: pairingPath,
-                deviceIP: TunnelConfig.targetIP
-            )
-            DispatchQueue.main.async {
-                guard let self,
-                      self.engineGeneration == generation,
-                      self.isSpoofing else { return }
-                if case .failure(let error) = result {
-                    NSLog("[Locus][Session] resend failed error=%@; reconnecting", error.localizedDescription)
-                    // The old UI could remain on “Spoofing” after the tunnel
-                    // had died. Mark it honestly and immediately rebuild the
-                    // session instead of waiting for the next health tick.
-                    self.lastError = error.localizedDescription
-                    self.status = .reconnecting
-                    self.apply(sim, pairing: pairing, markRecent: false)
-                }
-                else {
-                    NSLog("[Locus][Session] resend succeeded")
-                }
-            }
-        }
-    }
-
     private func startHealth(pairing: PairingStore) {
         stopHealth()
         NSLog("[Locus][Session] health timer start interval=12")
@@ -443,21 +436,15 @@ final class SpoofSession: ObservableObject {
         )
         timer.schedule(deadline: .now() + .seconds(12), repeating: .seconds(12), leeway: .seconds(2))
         timer.setEventHandler { [weak self] in
-            Task { @MainActor in
-                guard let self, let sim = self.simulated else { return }
-                NSLog("[Locus][Session] health fired status=%@", self.status.label)
-                if case .dropped = self.status {
+            NSLog("[Locus][Session] health fired")
+            // Probe the native session directly from the timer queue. Only
+            // the resulting UI transition needs the main actor.
+            LocationEngine.sessionActive { [weak self] active in
+                DispatchQueue.main.async {
+                    guard let self, !active, self.isSpoofing,
+                          let sim = self.simulated else { return }
                     self.status = .reconnecting
                     self.apply(sim, pairing: pairing, markRecent: false)
-                } else if self.isSpoofing {
-                    LocationEngine.sessionActive { [weak self] active in
-                        DispatchQueue.main.async {
-                            guard let self, !active, self.isSpoofing,
-                                  let sim = self.simulated else { return }
-                            self.status = .reconnecting
-                            self.apply(sim, pairing: pairing, markRecent: false)
-                        }
-                    }
                 }
             }
         }
