@@ -4,6 +4,7 @@ import Foundation
 /// Plays near-silent audio so iOS keeps Locus runnable (and able to accept
 /// TCP) while the user is in Settings › Developer Mode.
 final class SilentAudioKeepAlive {
+    private let queue = DispatchQueue(label: "com.chrismack.locus.audio-keepalive", qos: .utility)
     private var player: AVAudioPlayer?
     private var interruptionObserver: NSObjectProtocol?
     private var resetObserver: NSObjectProtocol?
@@ -15,11 +16,7 @@ final class SilentAudioKeepAlive {
             object: AVAudioSession.sharedInstance(),
             queue: .main
         ) { [weak self] note in
-            guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-            if type == .ended {
-                self?.start()
-            }
+            self?.handleInterruption(note)
         }
         resetObserver = center.addObserver(
             forName: AVAudioSession.mediaServicesWereResetNotification,
@@ -40,6 +37,26 @@ final class SilentAudioKeepAlive {
     }
 
     func start() {
+        queue.async { [weak self] in
+            self?.startLocked()
+        }
+    }
+
+    func stop() {
+        queue.async { [weak self] in
+            self?.stopLocked()
+        }
+    }
+
+    private func handleInterruption(_ note: Notification) {
+        guard let typeValue = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        if type == .ended {
+            start()
+        }
+    }
+
+    private func startLocked() {
         if player?.isPlaying == true { return }
         do {
             let session = AVAudioSession.sharedInstance()
@@ -63,7 +80,7 @@ final class SilentAudioKeepAlive {
         }
     }
 
-    func stop() {
+    private func stopLocked() {
         player?.stop()
         player = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
