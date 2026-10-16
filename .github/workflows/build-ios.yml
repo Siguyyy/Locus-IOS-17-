@@ -37,11 +37,11 @@ jobs:
           mkdir -p artifact/Payload
           cp -R build/Build/Products/Release-iphoneos/Locus.app artifact/Payload/
           cd artifact
-          zip -qry ../Locus-iOS17-1.0.7-background-recovery-unsigned.ipa Payload
+          zip -qry ../Locus-iOS17-1.0.8-diagnostics-unsigned.ipa Payload
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Locus-iOS17-1.0.7-background-recovery-unsigned
-          path: Locus-iOS17-1.0.7-background-recovery-unsigned.ipa
+          name: Locus-iOS17-1.0.8-diagnostics-unsigned
+          path: Locus-iOS17-1.0.8-diagnostics-unsigned.ipa
 
