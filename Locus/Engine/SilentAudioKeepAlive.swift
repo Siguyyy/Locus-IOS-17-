@@ -81,6 +81,7 @@ final class SilentAudioKeepAlive {
     }
 
     private func stopLocked() {
+        NSLog("[Locus][Audio] keep-alive stop")
         player?.stop()
         player = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
