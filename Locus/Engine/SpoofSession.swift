@@ -161,6 +161,7 @@ final class SpoofSession: ObservableObject {
     /// Location mode is the primary mechanism so the resend and health timers
     /// can continue while the app is not visible.
     func handleScenePhase(_ phase: ScenePhase) {
+        NSLog("[Locus][Session] scene phase=%@ spoofing=%d", String(describing: phase), isSpoofing ? 1 : 0)
         guard isSpoofing else { return }
         switch phase {
         case .active, .background:
@@ -321,6 +322,7 @@ final class SpoofSession: ObservableObject {
         let generation = engineGeneration
         let pairingPath = pairing.pairingPath
         isBusy = true
+        NSLog("[Locus][Session] apply generation=%d markRecent=%d", generation, markRecent ? 1 : 0)
         // The FFI can wait on a tunnel response. Never run it on the main
         // actor: iOS kills the app after a 10-second scene watchdog timeout.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -335,6 +337,7 @@ final class SpoofSession: ObservableObject {
                 self.isBusy = false
                 switch result {
                 case .success:
+                    NSLog("[Locus][Session] apply success generation=%d", generation)
                     self.simulated = coordinate
                     self.pin = coordinate
                     self.status = .active
@@ -347,6 +350,7 @@ final class SpoofSession: ObservableObject {
                         self.pushRecent(coordinate)
                     }
                 case .failure(let error):
+                    NSLog("[Locus][Session] apply failed generation=%d error=%@", generation, error.localizedDescription)
                     self.lastError = error.localizedDescription
                     if self.simulated != nil {
                         self.status = .dropped(error.localizedDescription)
@@ -374,6 +378,7 @@ final class SpoofSession: ObservableObject {
 
     private func startResend(pairing: PairingStore) {
         stopResend()
+        NSLog("[Locus][Session] resend timer start interval=8")
         let timer = DispatchSource.makeTimerSource(
             flags: [],
             queue: DispatchQueue(label: "com.chrismack.locus.location-resend", qos: .utility)
@@ -399,6 +404,7 @@ final class SpoofSession: ObservableObject {
 
     private func resendOnce(pairing: PairingStore) {
         guard isSpoofing, !isBusy, let sim = simulated else { return }
+        NSLog("[Locus][Session] resend fired")
         let generation = engineGeneration
         let pairingPath = pairing.pairingPath
         DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -413,6 +419,7 @@ final class SpoofSession: ObservableObject {
                       self.engineGeneration == generation,
                       self.isSpoofing else { return }
                 if case .failure(let error) = result {
+                    NSLog("[Locus][Session] resend failed error=%@; reconnecting", error.localizedDescription)
                     // The old UI could remain on “Spoofing” after the tunnel
                     // had died. Mark it honestly and immediately rebuild the
                     // session instead of waiting for the next health tick.
@@ -420,12 +427,16 @@ final class SpoofSession: ObservableObject {
                     self.status = .reconnecting
                     self.apply(sim, pairing: pairing, markRecent: false)
                 }
+                else {
+                    NSLog("[Locus][Session] resend succeeded")
+                }
             }
         }
     }
 
     private func startHealth(pairing: PairingStore) {
         stopHealth()
+        NSLog("[Locus][Session] health timer start interval=12")
         let timer = DispatchSource.makeTimerSource(
             flags: [],
             queue: DispatchQueue(label: "com.chrismack.locus.health", qos: .utility)
@@ -434,6 +445,7 @@ final class SpoofSession: ObservableObject {
         timer.setEventHandler { [weak self] in
             Task { @MainActor in
                 guard let self, let sim = self.simulated else { return }
+                NSLog("[Locus][Session] health fired status=%@", self.status.label)
                 if case .dropped = self.status {
                     self.status = .reconnecting
                     self.apply(sim, pairing: pairing, markRecent: false)
@@ -482,6 +494,7 @@ final class SpoofSession: ObservableObject {
     }
 
     private func beginBackground() {
+        NSLog("[Locus][Session] begin background keep-alive")
         locationKeeper.start()
         // A silent playback session is a practical iOS background execution
         // keep-alive for this developer-only tunnel. Its AVFoundation work is
@@ -495,6 +508,7 @@ final class SpoofSession: ObservableObject {
     }
 
     private func backgroundTaskExpired() {
+        NSLog("[Locus][Session] finite background task expired; reasserting keep-alives")
         guard backgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTask)
         backgroundTask = .invalid
@@ -505,6 +519,7 @@ final class SpoofSession: ObservableObject {
     }
 
     private func endBackground() {
+        NSLog("[Locus][Session] end background keep-alive")
         audioKeepAlive.stop()
         guard backgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTask)
