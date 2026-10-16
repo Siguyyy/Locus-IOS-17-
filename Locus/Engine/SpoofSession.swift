@@ -1,6 +1,7 @@
 import CoreLocation
 import Foundation
 import MapKit
+import Network
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -92,6 +93,9 @@ final class SpoofSession: ObservableObject {
     private var engineGeneration = 0
     private let locationKeeper = BackgroundKeepAlive()
     private let audioKeepAlive = SilentAudioKeepAlive()
+    private let pathMonitor = NWPathMonitor()
+    private let pathMonitorQueue = DispatchQueue(label: "com.chrismack.locus.network-path", qos: .utility)
+    private var activePairing: PairingStore?
 
     private let favoritesKey = "locus.favorites"
     private let recentsKey = "locus.recents"
@@ -99,6 +103,16 @@ final class SpoofSession: ObservableObject {
     init() {
         favorites = SavedPlace.load(key: favoritesKey)
         recents = SavedPlace.load(key: recentsKey)
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                self?.networkPathChanged(path)
+            }
+        }
+        pathMonitor.start(queue: pathMonitorQueue)
+    }
+
+    deinit {
+        pathMonitor.cancel()
     }
 
     var isSpoofing: Bool {
@@ -171,6 +185,33 @@ final class SpoofSession: ObservableObject {
             break
         @unknown default:
             break
+        }
+    }
+
+    private func networkPathChanged(_ path: NWPath) {
+        guard isSpoofing else { return }
+        NSLog("[Locus][Session] network path changed status=%@ wifi=%d cellular=%d", String(describing: path.status), path.usesInterfaceType(.wifi) ? 1 : 0, path.usesInterfaceType(.cellular) ? 1 : 0)
+
+        guard path.status == .satisfied else {
+            status = .reconnecting
+            lastError = "Network changed; waiting for the developer tunnel to reconnect."
+            return
+        }
+        guard let simulated, let pairing = activePairing else { return }
+
+        status = .reconnecting
+        lastError = nil
+        stopResend()
+        stopHealth()
+        engineGeneration &+= 1
+        let generation = engineGeneration
+        isBusy = true
+
+        LocationEngine.resetAsync { [weak self] in
+            guard let self,
+                  self.engineGeneration == generation,
+                  self.isSpoofing else { return }
+            self.apply(simulated, pairing: pairing, markRecent: false)
         }
     }
 
@@ -340,6 +381,7 @@ final class SpoofSession: ObservableObject {
                     NSLog("[Locus][Session] apply success generation=%d", generation)
                     self.simulated = coordinate
                     self.pin = coordinate
+                    self.activePairing = pairing
                     self.status = .active
                     self.lastError = nil
                     self.beginBackground()
@@ -530,4 +572,5 @@ final class SpoofSession: ObservableObject {
         return CLLocationCoordinate2D(latitude: coordinate.latitude + dLat, longitude: coordinate.longitude + dLon)
     }
 }
+
 

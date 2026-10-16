@@ -15,7 +15,7 @@ enum LocationEngineError: LocalizedError {
         switch self {
         case .invalidIP: return "Tunnel IP is invalid. Check Settings → Tunnel IP (usually 10.7.0.1)."
         case .pairingRead: return "Could not read the RPPairing file. Generate one with idevice_pair in RPPairing mode."
-        case .tunnelCreate: return "Could not open the developer tunnel. Is LocalDevVPN connected on Wi‑Fi?"
+        case .tunnelCreate: return "Could not open the developer tunnel. Keep LocalDevVPN connected while switching networks."
         case .remoteServer: return "Connected to the tunnel but RemoteXPC handshake failed."
         case .simulationCreate: return "Could not open Apple’s location simulation service."
         case .locationSet: return "Failed to set simulated coordinates."
@@ -88,6 +88,19 @@ enum LocationEngine {
             result = code == ok ? .success(()) : .failure(.from(code: code))
         }
         return result
+    }
+
+    /// Tear down a tunnel that may have become stale after a Wi-Fi/cellular
+    /// handoff. The cleanup runs on the engine queue so it cannot race a set
+    /// or clear operation, and it does not block the main actor.
+    static func resetAsync(completion: @escaping () -> Void) {
+        queue.async {
+            NSLog("[Locus][Engine] resetting tunnel after network change")
+            cleanup()
+            DispatchQueue.main.async {
+                completion()
+            }
+        }
     }
 
     /// Read the session state on the engine queue. This deliberately calls
@@ -201,4 +214,5 @@ enum LocationEngine {
         return ok
     }
 }
+
 
