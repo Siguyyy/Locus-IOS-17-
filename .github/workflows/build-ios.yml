@@ -17,6 +17,10 @@ jobs:
           targets: aarch64-apple-ios
 
       - name: Build idevice with bounded location replies
+        env:
+          IPHONEOS_DEPLOYMENT_TARGET: 17.0
+          CFLAGS: -miphoneos-version-min=17.0
+          RUSTFLAGS: -C link-arg=-miphoneos-version-min=17.0
         run: |
           IDEVICE_SOURCE="$RUNNER_TEMP/idevice"
           git clone --no-checkout https://github.com/jkcoxson/idevice.git "$IDEVICE_SOURCE"
