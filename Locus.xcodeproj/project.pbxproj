@@ -380,7 +380,7 @@
 				CODE_SIGN_ENTITLEMENTS = Locus/Resources/Locus.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -391,7 +391,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/Vendor/idevice",
 				);
-				MARKETING_VERSION = 1.0.10;
+				MARKETING_VERSION = 1.0.11;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lidevice_ffi",
@@ -486,7 +486,7 @@
 				CODE_SIGN_ENTITLEMENTS = Locus/Resources/Locus.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 11;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_TEAM = "";
 				ENABLE_BITCODE = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -497,7 +497,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/Vendor/idevice",
 				);
-				MARKETING_VERSION = 1.0.10;
+				MARKETING_VERSION = 1.0.11;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lidevice_ffi",
@@ -545,4 +545,5 @@
 	};
 	rootObject = EB04EC8B4299D1D64DC4EDE5 /* Project object */;
 }
+
 
